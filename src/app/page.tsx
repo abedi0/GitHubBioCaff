@@ -1,95 +1,129 @@
-import Image from "next/image";
+import { cookies } from "next/headers";
 import styles from "./page.module.css";
+import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 
-export default function Home() {
-  return (
-    <main className={styles.main}>
-      <div className={styles.description}>
-        <p>
-          Get started by editing&nbsp;
-          <code className={styles.code}>src/app/page.tsx</code>
-        </p>
-        <div>
-          <a
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{" "}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className={styles.vercelLogo}
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
-        </div>
-      </div>
+const API_URL = "https://api.github.com";
 
-      <div className={styles.center}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
-      </div>
+async function getProfile(token: string) {
+    const resp = await fetch(`${API_URL}/user`, {
+        headers: {
+            "Accept": "application/vnd.github+json",
+            "Authorization": `Bearer ${token}`,
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+    });
 
-      <div className={styles.grid}>
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Docs <span>-&gt;</span>
-          </h2>
-          <p>Find in-depth information about Next.js features and API.</p>
-        </a>
+    if (resp.status !== 200) {
+        throw new Error("Could't get profile!");
+    }
 
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Learn <span>-&gt;</span>
-          </h2>
-          <p>Learn about Next.js in an interactive course with&nbsp;quizzes!</p>
-        </a>
+    return resp.json();
+}
 
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Templates <span>-&gt;</span>
-          </h2>
-          <p>Explore starter templates for Next.js.</p>
-        </a>
+// Example input: 10mg (string)
+// returns 10 (number)
+function parseCaffNumber(val: string): number {
+    return parseInt(val.split("mg")[0]);
+}
 
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className={styles.card}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2>
-            Deploy <span>-&gt;</span>
-          </h2>
-          <p>
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
-    </main>
-  );
+function hasCaffLine(val: string): boolean {
+    return val.split(": ").length !== 1;
+}
+
+function caffText(message: string, caff: number): string {
+    return `${message}: ${caff}mg`;
+}
+
+function currentCaff(bio: string): number {
+    return parseCaffNumber(bio.split(": ")[1])
+}
+
+async function newBio(token: string, bio: string) {
+    const resp = await fetch(`${API_URL}/user`, {
+        method: "PATCH",
+        headers: {
+            "Accept": "application/vnd.github+json",
+            "Authorization": `Bearer ${token}`,
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+
+        body: JSON.stringify({ bio: bio })
+    });
+
+
+    return resp.status;
+}
+
+
+async function updateBio(currentBio: string, token: string, caff: number) {
+    const hasCaff = hasCaffLine(currentBio);
+
+    if (!hasCaff) {
+        const bio = caffText("Current caffeine amount", caff);
+
+        if (await newBio(token, bio) !== 200) {
+            throw new Error("Could't Edit bio!");
+        }
+    }
+    else {
+        const c = currentCaff(currentBio) + caff;
+        const bio = caffText("Current caffeine amount", c);
+
+        if (await newBio(token, bio) !== 200) {
+            throw new Error("Could't Edit bio!");
+        }
+    }
+
+}
+
+
+async function resetCaff(currentBio: string, token: string, caff: number) {
+    const hasCaff = hasCaffLine(currentBio);
+
+    if (!hasCaff) {
+        const bio = caffText("Current caffeine amount", 0);
+
+        if (await newBio(token, bio) !== 200) {
+            throw new Error("Could't Edit bio!");
+        }
+    }
+    else {
+        const bio = caffText("Current caffeine amount", 0);
+
+        if (await newBio(token, bio) !== 200) {
+            throw new Error("Could't Edit bio!");
+        }
+    }
+}
+
+export default async function Home() {
+    const token = cookies().get("token") || redirect("/auth");
+    const profile = await getProfile(token.value);
+
+    return (
+        <>
+            <h2>Hello, {profile.name}</h2>
+            <h4>Current Caff: {currentCaff(profile.bio)}mg</h4>
+            <form action={async () => {
+                "use server";
+                await updateBio(profile.bio, token.value, 75);
+                revalidatePath("/")
+            }}>
+                <button className={styles.page}>
+                    <h1>Espresso (75mg)</h1>
+                </button>
+            </form>
+
+            <form action={async () => {
+                "use server";
+                await resetCaff(profile.bio, token.value, 0);
+                revalidatePath("/")
+            }}>
+                <button className={styles.page} style={{ fontSize: "10px" }}>
+                    <h1>Reset</h1>
+                </button>
+            </form>
+        </>
+    );
 }
